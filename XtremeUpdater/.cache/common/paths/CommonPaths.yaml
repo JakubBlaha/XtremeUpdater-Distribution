@@ -1,0 +1,16 @@
+Battle.NET: {launchPath: Battle.net/Battle.net Launcher.exe, path: Battle.net/}
+Battlerite: {isURL: true, launchPath: 'steam://rungameid/504370', path: Program Files
+    (x86)/Steam/steamapps/common/Battlerite/}
+Blade and Soul: {launchPath: 'Program Files\NCWest\NCLauncher\NCLauncher.exe /LauncherID:"NCWest"
+    /CompanyID:"12" /GameID:"BnS" /LUpdateAddr:"updater.nclauncher.ncsoft.com"', path: Program
+    Files/NCSOFT/BnS/}
+BulletWitch: {launchPath: Games/Bullet Witch/witch.exe, path: Games/Bullet Witch/}
+Final Fantasy Lighting Returns: {isURL: true, launchPath: 'steam://rungameid/345350',
+  path: Steam/steamapps/common/LIGHTNING RETURNS FINAL FANTASY XIII/}
+Hearthstone: {isURL: true, launchPath: 'battlenet://WTCG', path: Program Files (x86)/Hearthstone/}
+League of Legends: {launchPath: Riot Games/League of Legends/LeagueClient.exe, path: Riot
+    Games/League of Legends/}
+Nier-Automata: {launchPath: NieR - Automata/NieRAutomata.exe, path: NieR - Automata/}
+Path of Exile: {isURL: true, launchPath: 'steam://rungameid/238960', path: Steam/steamapps/common/Path
+    of Exile/}
+World of Tanks: {launchPath: Games/WorldOfTanks/WoTLauncher.exe, path: Games/WorldOfTanks/}
