@@ -1,12 +1,11 @@
 from easygui import diropenbox, fileopenbox
 from _thread import start_new
 import yaml
-import os, sys
+import os
 import win32api
 import shutil
 import ctypes
 from random import randint
-from git import Git
 
 import kivy
 kivy.require('1.10.1')
@@ -78,8 +77,7 @@ class HeaderLabel(Label, WindowDragBehavior):
 
     def on_current_icon(self, *args):
         for child in self.children:
-            if isinstance(child, HeaderMiniLabel):
-                child.text = self.current_icon
+            child.text = self.current_icon
 
 
 class HeaderMiniLabel(Label, HoveringBehavior):
@@ -622,35 +620,12 @@ class RootLayout(BoxLayout, HoveringBehavior):
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        
+                    
         def on_frame(*args):
             self.show_sync_popup()
-            if not '--no-update' in sys.argv:
-                self.update_app()
-
-            else:
-                self.setup_updater()
+            self.setup_updater()
 
         Clock.schedule_once(on_frame)
-
-    @new_thread
-    def update_app(self):
-        UP_TO_DATE = 'Already up to date.'
-
-        self.sync_popup.text = 'Updating XtremeUpdater..'
-
-        g = Git()
-        try:
-            result = g.pull('origin', 'master')
-        except:
-            pass
-        else:
-            if result == UP_TO_DATE:
-                self.setup_updater()
-                return
-
-        app().stop()
-        os.system(f'{__file__} -- --no-update')
 
     def show_sync_popup(self):
         self.sync_popup = SyncPopup()
@@ -900,7 +875,7 @@ class XtremeUpdaterApp(App):
         self.root.goto_page(4)
 
 
-__version__ = '0.5.14.2'
+__version__ = '0.5.14.3'
 
 if __name__ == '__main__':
     xtremeupdater = XtremeUpdaterApp()
