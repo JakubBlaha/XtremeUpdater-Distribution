@@ -17,7 +17,7 @@ Config.set('graphics', 'height', 550)
 Config.set('graphics', 'borderless', 1)
 Config.set('graphics', 'resizable', 0)
 Config.set('input', 'mouse', 'mouse, disable_multitouch')
-Config.set('kivy', 'icon', 'img/icon.png')
+Config.set('kivy', 'window_icon', 'img/icon.png')
 
 from kivy.app import App
 from kivy.core.window import Window
@@ -875,7 +875,7 @@ class XtremeUpdaterApp(App):
         self.root.goto_page(4)
 
 
-__version__ = '0.5.14.4'
+__version__ = '0.5.14.5'
 
 if __name__ == '__main__':
     xtremeupdater = XtremeUpdaterApp()
