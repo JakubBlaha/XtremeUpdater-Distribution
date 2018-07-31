@@ -875,7 +875,7 @@ class XtremeUpdaterApp(App):
         self.root.goto_page(4)
 
 
-__version__ = '0.5.14.9'
+__version__ = '0.5.14.10'
 
 if __name__ == '__main__':
     xtremeupdater = XtremeUpdaterApp()
