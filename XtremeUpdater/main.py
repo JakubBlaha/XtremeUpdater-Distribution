@@ -6,18 +6,20 @@ import shutil
 import ctypes
 from random import randint
 from _thread import start_new
+from traceback import format_exc
+from PIL import ImageGrab, ImageFilter
 
 import kivy
 kivy.require('1.10.1')
 
 from kivy import Config
-Config.set('graphics', 'multisamples', 0)  # Hotfix for OpenGL detection bug
 Config.set('graphics', 'width', 1000)
 Config.set('graphics', 'height', 550)
 Config.set('graphics', 'borderless', 1)
 Config.set('graphics', 'resizable', 0)
 Config.set('input', 'mouse', 'mouse, disable_multitouch')
 Config.set('kivy', 'window_icon', 'img/icon.ico')
+Config.set('graphics', 'multisamples', 0)
 
 from kivy.app import App
 from kivy.factory import Factory
@@ -34,6 +36,7 @@ from kivy.uix.button import Button
 from kivy.uix.image import CoreImage
 from custpagelayout import PageLayout
 from kivy.uix.boxlayout import BoxLayout
+from kivy.graphics.texture import Texture
 from kivy.uix.scrollview import ScrollView
 from kivy.graphics import Rectangle, Color
 from kivy.uix.label import Label, CoreLabel
@@ -41,25 +44,44 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.listview import ListItemButton
 from kivy.properties import StringProperty, ObjectProperty, DictProperty, ListProperty, NumericProperty, BooleanProperty
 
-from theme import *
+from theme import theme
 from dll_updater import DllUpdater
 from hovering_behavior import HoveringBehavior
 from windowdragbehavior import WindowDragBehavior
 from get_image_url import get_image_url_from_response, TEMPLATE, HEADERS
 
-
-def read_file(path):
-    with open(path) as f:
-        return f.read()
-
-
-def is_admin():
-    return ctypes.windll.shell32.IsUserAnAdmin()
+IS_ADMIN = ctypes.windll.shell32.IsUserAnAdmin()
 
 
 def new_thread(fn):
     def wrapper(*args, **kwargs):
         start_new(fn, args, kwargs)
+
+    return wrapper
+
+
+def silent_exc(fn):
+    def wrapper(*args, **kw):
+        app = App.get_running_app()
+
+        try:
+            fn(*args, **kw)
+        except Exception:
+            app.root.bar.error_ping()
+        else:
+            app.root.bar.ping()
+
+    return wrapper
+
+
+def notify_restart(fn):
+    def wrapper(*args, **kw):
+        fn(*args, **kw)
+        Factory.Notification(
+            title_='Restart system',
+            message=
+            f'This [color={theme.PRIM}]tweak[/color] may not work until the system is [color={theme.PRIM}]restarted[/color].'
+        ).open()
 
     return wrapper
 
@@ -130,7 +152,7 @@ class HeaderMiniLabel(Label, HoveringBehavior):
             Clock.schedule_once(self.rotate, randint(0, 10))
         else:
             self.unbind_hovering()
-        
+
         self.rotation_angle = randint(0, 361)
 
     def rotate(self, *args):
@@ -148,26 +170,19 @@ class HeaderMiniLabel(Label, HoveringBehavior):
             Animation.stop_all(self)
             (Animation(
                 rotation_angle=self.rotation_angle + 500,
-                color=prim,
+                color=theme.prim,
                 d=.5,
-                t='out_expo') + Animation(color=bg, d=.5)).start(self)
+                t='out_expo') + Animation(color=theme.bg, d=.5)).start(self)
 
 
 class CustButton(Button, HoveringBehavior):
-    color_hovering = ListProperty(prim)
+    color_hovering = ListProperty(theme.prim)
     background_color_hovering = ListProperty([0, 0, 0, 0])
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-
-        def on_frame(*args):
-            self.orig_background_color = self.background_color
-            self.orig_color = self.color
-
-        Clock.schedule_once(on_frame)
 
     def on_enter(self):
         if not self.disabled:
+            self.orig_background_color = self.background_color
+            self.orig_color = self.color
             Animation(
                 color=self.color_hovering,
                 background_color=self.background_color_hovering,
@@ -176,17 +191,21 @@ class CustButton(Button, HoveringBehavior):
     def on_leave(self, force=False):
         if not self.disabled or force:
             Animation(
-                color=self.orig_color,
-                background_color=self.orig_background_color,
+                color=getattr(self, 'orig_color', self.color),
+                background_color=getattr(self, 'orig_background_color',
+                                         self.background_color),
                 d=.1).start(self)
 
     def on_disabled(self, *args):
         if self.disabled:
             Animation(opacity=.1, d=.1).start(self)
-            Clock.schedule_once(lambda *args: self.on_leave(force=True))
+            if self.hovering:
+                self.on_leave(force=True)
 
         else:
             Animation(opacity=1, d=.1).start(self)
+            if self.hovering:
+                self.on_enter()
 
 
 class LabelIconButton(BoxLayout):
@@ -265,18 +284,19 @@ class OverdrawLabel(FloatLayout):
         Animation.stop_all(self)
         Animation(opacity=1, d=.2).start(self)
         if app.conf.animations:
-            Clock.schedule_interval(self.animate, 4)
+            anim = (
+                Animation(angle=self.__MAX_TILT, d=.3, t='in_out_expo') +
+                Animation(angle=0, d=1, t='out_elastic') + Animation(d=2) +
+                Animation(angle=self.__MAX_TILT * -1, d=.3, t='in_out_expo') +
+                Animation(angle=0, d=1, t='out_elastic') + Animation(d=2))
+            anim.repeat = True
+            anim.start(self)
 
     def dismiss(self, *args):
         Animation.stop_all(self)
         anim = Animation(opacity=0, d=.2)
         anim.bind(on_complete=lambda *args: self.widget.remove_widget(self))
         anim.start(self)
-
-    def animate(self, *args):
-        (Animation(angle=self.__MAX_TILT * -1, d=.3, t='out_expo') + Animation(
-            angle=self.__MAX_TILT, d=.3, t='out_expo') + Animation(
-                angle=0, d=.5, t='out_bounce')).start(self)
 
 
 class GameCollection(ScrollView):
@@ -291,8 +311,6 @@ class GameCollection(ScrollView):
             self.custom_paths = JsonStore(self.CUSTOM_PATHS_PATH)
 
     def update_local_games(self):
-        app.root.bar.work()
-
         self.update_custom_games()
 
         if os.path.isfile(self.COMMON_PATHS_CACHE_PATH):
@@ -308,10 +326,8 @@ class GameCollection(ScrollView):
             with open(self.COMMON_PATHS_CACHE_PATH, 'w') as stream:
                 yaml.dump(dict(self.datastore), stream)
 
-            app.root.bar.unwork()
-
         def on_request_error(*args):
-            app.root.bar.unwork()
+            app.root.bar.error_ping()
 
         UrlRequest(
             self.COMMON_PATHS_URL,
@@ -388,20 +404,40 @@ class GameCollection(ScrollView):
 
 class CustPopup(Popup):
     icon = StringProperty()
-    final_size_hint = ListProperty([.9, .9])
 
     def __init__(self, **kw):
+        img = ImageGrab.grab()
+        img = img.crop([
+            Window.left, Window.top, Window.left + Window.width,
+            Window.top + Window.height
+        ])
+        img = img.filter(ImageFilter.GaussianBlur(50))
+
         super().__init__(**kw)
 
+        def on_frame(*args):
+            tex = Texture.create(size=img.size)
+            tex.blit_buffer(pbuffer=img.tobytes())
+            tex.flip_vertical()
+            self.canvas.before.get_group('blur')[0].texture = tex
+
+        Clock.schedule_once(on_frame)
+
         self.children[0].children[2].markup = True
-        
-        label = CoreLabel(text=self.icon, font_name='fnt/segmdl2.ttf', font_size=72, color=bg, padding=[18, 18])
+
+        label = CoreLabel(
+            text=self.icon,
+            font_name='fnt/segmdl2.ttf',
+            font_size=72,
+            color=theme.sec,
+            padding=[18, 18])
         label.refresh()
         tex = label.texture
 
         with self.canvas:
             Color(1, 1, 1, 1)
-            self.icon_rect = Rectangle(texture=tex, pos=self.pos, size=label.size)
+            self.icon_rect = Rectangle(
+                texture=tex, pos=self.pos, size=label.size)
 
         Clock.schedule_interval(self.dance_icon, 2)
 
@@ -415,16 +451,25 @@ class CustPopup(Popup):
 
     def on_open(self, *args):
         Animation(
-            size_hint=self.final_size_hint, opacity=1, d=.5, t='out_expo').start(self)
+            size_hint=self.final_size_hint, opacity=1, d=.5,
+            t='out_expo').start(self)
 
     def on_dismiss(self, *args):
-        Animation(
-            size_hint=[i + .1 for i in self.size_hint], opacity=0, d=.1, t='out_quad').start(self)
+        Animation(size_hint=[1, 1], opacity=0, d=.1, t='in_expo').start(self)
 
 
 class GameRemovePopup(CustPopup):
     game = StringProperty()
     proceed_command = ObjectProperty()
+
+
+class ErrorPopup(CustPopup):
+    message = StringProperty()
+
+
+class RestorePopup(ErrorPopup):
+    restored = ListProperty()
+    not_restored = ListProperty()
 
 
 class ImageCacher:
@@ -501,9 +546,6 @@ class GameButton(Button, HoveringBehavior):
     def remove_from_collection(self):
         self.parent.parent.remove_from_collection(self)
 
-    def quick_update(self):
-        app.root.load_dll_view_data(self.path, quickupdate=True)
-
     def update_image(self):
         query = self.text
         query += ' logo wallpaper'
@@ -540,28 +582,29 @@ class NavigationButton(CustButton):
     highlight_height = NumericProperty()
     highlight_width = NumericProperty()
     highlight_width_ratio = .8
-    highlight_color = ListProperty(prim)
+    highlight_color = ListProperty(theme.prim)
 
     def highlight(self):
         self.__active = True
         Animation.stop_all(self)
-        Animation(
-            highlight_height=self.height,
+        (Animation(
             highlight_width=self.width,
-            highlight_color=sec,
-            color=fg,
+            highlight_color=theme.sec,
+            color=theme.fg,
             d=.5,
-            t='out_expo').start(self)
+            t='out_expo') & Animation(
+                highlight_height=self.height, d=.3,
+                t='in_out_quint')).start(self)
 
     def nohighghlight(self):
         self.__active = False
         Animation.stop_all(self)
-        Animation(
-            highlight_height=0,
+        (Animation(
             highlight_width=self.width * self.highlight_width_ratio,
-            highlight_color=prim,
+            highlight_color=theme.prim,
             d=.1,
-            t='in_expo').start(self)
+            t='in_expo') & Animation(
+                highlight_height=0, d=.1, t='in_out_quint')).start(self)
 
     def on_leave(self, *args, **kw):
         if not self.__active and not self.disabled:
@@ -607,34 +650,18 @@ class Navigation(BoxLayout, NoiseTexture):
 
 
 class Content(PageLayout):
+    commands = DictProperty()
+
     def on_page(self, _, page):
         try:
             self.parent.ids.navigation.active = page
         except IndexError:
             pass
 
-
-class PlaceHolder(Label):
-    message = StringProperty('Coming soon')
-    icon = StringProperty('\ue946')
-
-
-class SubdirItem(Button, HoveringBehavior):
-    path = StringProperty()
-    highlight_width = NumericProperty()
-    highlight_alpha = NumericProperty()
-
-    def on_hovering(self, *args):
-        if self.hovering:
-            Animation(
-                highlight_width=self.width,
-                highlight_alpha=1,
-                d=.3,
-                t='out_expo').start(self)
-        else:
-            Animation(
-                highlight_width=self.width*.95, highlight_alpha=0, d=.3,
-                t='out_expo').start(self)
+        try:
+            self.commands[page]()
+        except KeyError:
+            pass
 
 
 class DllViewItem(ListItemButton):
@@ -655,8 +682,10 @@ class DllViewItem(ListItemButton):
 
 
 class DllViewAdapter(ListAdapter):
-    def on_selection_change(self, *args):
-        App.get_running_app().root.set_dll_buttons_state(self.selection)
+    def on_data(self, *args):
+        self.unbind(data=self.on_data)
+        self.data.sort()
+        self.bind(data=self.on_data)
 
     def get_views(self) -> list:
         return [self.get_view(index) for index, __ in enumerate(self.data)]
@@ -664,19 +693,24 @@ class DllViewAdapter(ListAdapter):
     def invert_selection(self):
         Clock.schedule_once(lambda *args: self.select_list(self.get_views()))
 
+    def select_by_text(self, items: list):
+        views = [view for view in self.get_views() if view.text in items]
+        Clock.schedule_once(lambda *args: self.select_list(views))
+
 
 class SyncPopup(Popup, NoiseTexture):
     icon_rotation = NumericProperty()
 
     def __init__(self, **kw):
         super().__init__(**kw)
+
         if app.conf.animations:
-            Clock.schedule_interval(self.rotate_icon, 1)
+            Clock.schedule_interval(self.rotate_icon, 2)
 
     def rotate_icon(self, *args):
         Animation(
-            icon_rotation=self.icon_rotation - 180, d=.5,
-            t='out_expo').start(self)
+            icon_rotation=self.icon_rotation - 180, d=2,
+            t='out_elastic').start(self)
 
     def dismiss(self):
         Animation(opacity=0, d=.5).start(self)
@@ -686,69 +720,118 @@ class SyncPopup(Popup, NoiseTexture):
 class LaunchNowButton(CustButton):
     def __init__(self, **kw):
         super().__init__(**kw)
-        Clock.schedule_interval(self.animate, 2)
 
-    def animate(self, *args):
-        (Animation(padding_y=5, d=.2, t='out_expo') + Animation(
-            padding_y=0, d=.2, t='out_bounce')).start(self)
+        anim = (Animation(padding_y=self.padding_y + 5, d=.2, t='out_expo') +
+                Animation(padding_y=self.padding_y, d=.2,
+                          t='out_bounce') + Animation(d=2))
+        anim.repeat = True
+        anim.start(self)
 
     def on_release(self):
         app.root.launch_updated()
 
-        Animation(height=0, d=1, t='out_expo').start(self)
+        (Animation(opacity=0, d=.5, t='out_expo') + Animation(
+            height=0, d=.5, t='out_expo')).start(self)
         Clock.schedule_once(
-            lambda *args: app.root.ids.content_updater.remove_widget(self),
-            1)
+            lambda *args: app.root.ids.content_updater.remove_widget(self), 1)
 
 
 class WorkingBar(Widget):
     color = ListProperty()
     _x1 = NumericProperty()
     _x2 = NumericProperty()
-    __animation_state = 0
 
     def ping(self):
-        Animation.stop_all(self)
-        (Animation(_x1=self.width, d=.3, t='out_expo') + Animation(
-            _x2=self.width, d=.3, t='out_expo') + Animation(_x1=0, _x2=0,
-                                                            d=0)).start(self)
+        if hasattr(self, 'working_anim'):
+            return
+
+        self._x1, self._x2 = 0, 0
+        (Animation(_x1=0, _x2=1, d=.5, t='out_expo') + Animation(
+            _x1=1, d=.5, t='out_expo')).start(self)
 
     def error_ping(self):
-        Animation.stop_all(self)
-        (Animation(_x1=self.width, color=[1, .3, .3, 1], d=.3, t='out_expo') +
-         Animation(_x2=self.width, d=.3, t='out_expo') + Animation(
-             _x1=0, _x2=0, color=prim, d=0)).start(self)
+        self.color = [1, .3, .3, 1]
+        self.ping()
+        Clock.schedule_once(lambda *args: setattr(self, 'color', theme.prim),
+                            1)
 
     def work(self):
-        self.working_clock = Clock.schedule_interval(self.animate, .5)
+        self.working_anim = Animation(
+            _x1=0, _x2=0, d=.5, t='out_expo') + Animation(
+                _x1=0, _x2=1, d=.5, t='out_expo') + Animation(
+                    _x1=1, _x2=1, d=.5, t='out_expo') + Animation(
+                        _x1=0, _x2=1, d=.5, t='out_expo')
+        self.working_anim.repeat = True
+        self.working_anim.start(self)
 
     def unwork(self):
-        if hasattr(self, 'working_clock'):
-            self.working_clock.cancel()
-            Animation(_x1=0, _x2=0, d=.5, t='out_expo').start(self)
+        if hasattr(self, 'working_anim'):
+            self.working_anim.bind(on_complete=self.clear)
+            self.working_anim.repeat = False
+            del self.working_anim
 
-    def animate(self, *args):
-        states = ((0, .1), (0, 1), (.9, 1), (0, 1))
-
-        Animation(
-            _x1=states[self.__animation_state][0] * self.width,
-            _x2=states[self.__animation_state][1] * self.width,
-            d=.5,
-            t='out_expo').start(self)
-
-        self.__animation_state += 1
-        self.__animation_state %= 4
+    def clear(self, *args):
+        Clock.schedule_once(
+            lambda *args: Animation(_x1=0, _x2=0, d=.5, t='out_expo').start(self)
+        )
 
     def set_value(self, value: float):
         self.unwork()
         Animation.stop_all(self)
-        Animation(
-            _x1=0, _x2=value * self.width, d=.5, t='out_expo').start(self)
+        Animation(_x1=0, _x2=value, d=.5, t='out_expo').start(self)
+
+
+class Notification(Popup):
+    title_ = StringProperty('Notification')
+    message = StringProperty('Example message')
+    _decor_size = ListProperty([6, 20])
+    _bg_offset = NumericProperty(-200)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+
+        self.children[0].children[2].markup = True
+
+        (Animation(_decor_size=[self._decor_size[0], 0], d=0) + Animation(
+            opacity=1,
+            _bg_offset=0,
+            _decor_size=self._decor_size,
+            d=.5,
+            t='out_expo')).start(self)
+
+        Clock.schedule_once(self.dismiss, 3)
+
+    def on_touch_down(self, *args):
+        pass
+
+    def dismiss(self, *args):
+        anim = Animation(
+            opacity=0, _bg_offset=200, _decor_size=[0, 0], d=.5, t='out_expo')
+        anim.bind(
+            on_complete=lambda *args: super(Notification, self).dismiss())
+        anim.start(self)
+
+
+class IsAdminNotif(Notification):
+    title_template = '{} as admin'
+    message_template = '{} tweaks are available.'
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+
+        self.title_ = self.title_template.format(
+            '[color=5f5]Running[/color]'
+            if IS_ADMIN else '[color=f55]Not running[/color]')
+        self.message = self.message_template.format(
+            '[color=5f5]All[/color]'
+            if IS_ADMIN else '[color=f55]Only some[/color]')
 
 
 class RootLayout(BoxLayout, HoveringBehavior):
     mouse_highlight_pos = ListProperty([-120, -120])
     dlls_loaded = BooleanProperty(False)
+    listed_dlls = ListProperty()
+    path = StringProperty()
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -774,14 +857,14 @@ class RootLayout(BoxLayout, HoveringBehavior):
         if self.dlls_loaded:
             self.ids.refresh_button.disabled = True
             OverdrawLabel(
-                widget=self.ids.dll_view,
+                widget=self.ids.quickupdate_content,
                 icon='\uf12b',
                 text='Select a directory')
 
         else:
             self.ids.refresh_button.disabled = False
             OverdrawLabel(
-                widget=self.ids.dll_view,
+                widget=self.ids.quickupdate_content,
                 icon='\uea6a',
                 text='Error when syncing')
 
@@ -809,94 +892,119 @@ class RootLayout(BoxLayout, HoveringBehavior):
         app.conf.animations = value
         self.ids.content.anim_kwargs['d'] = .5 * value
 
-    def set_dll_buttons_state(self, enabled):
-        self.ids.restore_button.disabled = not enabled
-        self.ids.update_button.disabled = not enabled
-
     @new_thread
     def load_directory(self):
         self.load_dll_view_data(easygui.diropenbox())
 
-    def load_dll_view_data(self, path, quickupdate=False):
-        self.launch_path = None
-        self.goto_page(0)
-
+    @new_thread
+    def load_dll_view_data(self, path):
         if not path:
             return
 
         path = os.path.abspath(path)
 
+        self.goto_page(0)
+        self.launch_path = None
+        self.path = path
         self.ids.path_info.text = path
+        self.ids.selective_update_btn.disabled = True
+        self.ids.update_all_btn.disabled = True
 
         if not os.path.isdir(path):
             return
 
         try:
             self.ids.content_updater.remove_widget(self.launch_now_btn)
-        except:
+        except AttributeError:
             pass
 
-        self.set_dll_buttons_state(False)
-        self.ids.invert_selection_button.disabled = True
+        self.ids.quickupdate_content.overdrawer.dismiss()
+        self.bar.work()
 
-        local_dlls = self.updater.local_dlls(path)
+        self.listed_dlls = []
+        for relative_path in self.updater.local_dlls(path):
+            if os.path.basename(relative_path) in self.updater.available_dlls:
+                self.listed_dlls.append(relative_path)
 
-        if not local_dlls:
-            Factory.ErrorPopup(title='No dlls found here!').open()
-            self.bar.error_ping()
+        if not self.listed_dlls:
+            ErrorPopup(
+                title='No dlls found here!',
+                message=
+                f'We are sorry. We have not found any dlls to update here in\n[color={theme.PRIM}]{path}[/color].'
+            ).open()
 
         else:
+            self.ids.selective_update_btn.disabled = False
+            self.ids.update_all_btn.disabled = False
+
             if app.conf.show_disclaimer:
                 Factory.DisclaimerPopup().open()
                 app.conf.show_disclaimer = False
-            
-            self.ids.dll_view.overdrawer.dismiss()
-
-            self.ids.dll_view.adapter.data = set(local_dlls).intersection(
-                self.updater.available_dlls)
-            self.ids.dll_view.adapter.invert_selection()
-
-            if quickupdate:
-                Clock.schedule_once(lambda *args: self.update_callback())
-
-        self.load_subdirs(path)
-
-    @new_thread
-    def load_subdirs(self, path):
-        self.bar.work()
-
-        self.ids.subdir_view.data = [{
-            'path': subdir
-        } for subdir in self.updater.dll_subdirs(path,
-                                                 self.updater.available_dlls)]
 
         self.bar.unwork()
 
+    def load_selective(self):
+        self.ids.content.page = 6
+
+        if self.ids.dll_view.adapter.data == sorted(self.listed_dlls):
+            return
+
+        self.ids.dll_view.adapter.data = self.listed_dlls
+
+        last_selected = ConfLastDlls.get_list(self.path)
+
+        if last_selected:
+            self.ids.dll_view.adapter.select_by_text(last_selected)
+        elif not self.ids.dll_view.adapter.selection:
+            self.ids.dll_view.adapter.invert_selection()
+
+        self.bar.ping()
+
     @new_thread
-    def update_callback(self):
-        self.set_dll_buttons_state(False)
+    def update_callback(self, from_selection=False):
+        self.goto_page(0)
         self.ids.invert_selection_button.disabled = True
         OverdrawLabel(
-            widget=self.ids.dll_view, icon='\ue896', text='Updating dlls..')
+            widget=self.ids.quickupdate_content,
+            icon='\ue896',
+            text='Updating dlls..')
 
-        dlls = [item.text for item in self.ids.dll_view.adapter.selection]
+        if from_selection:
+            dlls = [item.text for item in self.ids.dll_view.adapter.selection]
+            ConfLastDlls.set_list(self.path, dlls)
+        else:
+            dlls = self.listed_dlls
+
+        Notification(
+            title_=f'Updating {len(dlls)} dlls',
+            message=
+            f'This can take a [color={theme.PRIM}]while[/color] depending on your [color={theme.PRIM}]internet speed[/color].'
+        ).open()
 
         try:
-            self.updater.update_dlls(self.ids.path_info.text, dlls)
+            self.updater.update_dlls(self.path, dlls)
 
-        except:
-            Factory.ErrorPopup(title='Failed to update dlls!').open()
-            self.bar.error_ping()
+        except Exception:
+            ErrorPopup(
+                title='Failed to update dlls!',
+                message=
+                f'Something happened and we are not sure what it was. Please contact our support from the settings.\n\n[color=f55]{format_exc()}[/color]'
+            ).open()
             OverdrawLabel(
-                widget=self.ids.dll_view, icon='\uea39', text='Update failed')
+                widget=self.ids.quickupdate_content,
+                icon='\uea39',
+                text='Update failed')
 
         else:
             OverdrawLabel(
-                widget=self.ids.dll_view, icon='\ue930', text='Completed')
+                widget=self.ids.quickupdate_content,
+                icon='\ue930',
+                text='Completed')
 
             if self.launch_path:
                 self.launch_now_btn = LaunchNowButton()
-                self.ids.content_updater.add_widget(self.launch_now_btn, index=1)
+                self.ids.content_updater.add_widget(
+                    self.launch_now_btn, index=0)
 
         self.ids.dll_view.adapter.data = []
 
@@ -905,32 +1013,18 @@ class RootLayout(BoxLayout, HoveringBehavior):
 
     def restore_callback(self):
         dlls = [item.text for item in self.ids.dll_view.adapter.selection]
-        self.updater.restore_dlls(self.ids.path_info.text, dlls)
+        restored, not_restored = self.updater.restore_dlls(self.path, dlls)
 
-        self.bar.ping()
+        Factory.RestorePopup(
+            restored=restored, not_restored=not_restored).open()
 
+    @silent_exc
     def clear_images_cache(self):
-        try:
-            shutil.rmtree(os.path.join(os.getcwd(), ImageCacher.CACHE_DIR))
+        shutil.rmtree(os.path.join(os.getcwd(), ImageCacher.CACHE_DIR))
 
-        except FileNotFoundError:
-            self.bar.error_ping()
-
-        else:
-            self.bar.ping()
-
+    @silent_exc
     def clear_common_paths_cache(self):
-        try:
-            os.remove(GameCollection.COMMON_PATHS_CACHE_PATH)
-
-        except FileNotFoundError:
-            self.bar.error_ping()
-
-        else:
-            self.bar.ping()
-
-    def refresh_dll_view(self):
-        self.load_dll_view_data(self.ids.path_info.text)
+        os.remove(GameCollection.COMMON_PATHS_CACHE_PATH)
 
     def goto_page(self, index):
         self.ids.content.page = index
@@ -952,11 +1046,16 @@ class RootLayout(BoxLayout, HoveringBehavior):
         self.ids.game_add_form_launch.text = path
 
     def add_game_callback(self):
-        os.makedirs('.config', exist_ok=True)
-
         game_name = self.ids.game_name_input.text
         game_patch_dir = self.ids.game_add_form_dir.text
-        game_launch_path = self.ids.url_input.text
+        game_launch_path = (self.ids.game_add_form_launch.text
+                            if self.ids.game_add_form_launch.text else
+                            self.ids.url_input.text)
+
+        if not (game_name and game_patch_dir and game_launch_path):
+            return
+
+        os.makedirs('.config', exist_ok=True)
 
         if not game_launch_path:
             game_launch_path = self.ids.game_add_form_launch.text
@@ -979,15 +1078,9 @@ class RootLayout(BoxLayout, HoveringBehavior):
         self.ids.url_input.text = ''
         self.goto_page(1)
 
+    @silent_exc
     def reset_custom_paths(self):
-        try:
-            os.remove(GameCollection.CUSTOM_PATHS_PATH)
-
-        except FileNotFoundError:
-            self.bar.error_ping()
-
-        else:
-            self.bar.ping()
+        os.remove(GameCollection.CUSTOM_PATHS_PATH)
 
     def switch_head_decor(self, _, value):
         app.conf.head_decor = value
@@ -1022,6 +1115,67 @@ class RootLayout(BoxLayout, HoveringBehavior):
         os.startfile(UNINST_PATH)
         app.stop()
 
+    @silent_exc
+    def export_logs(self):
+        OUTPUT = os.path.expanduser('~\\Desktop\\XtremeUpdater_Logs.zip')
+        SOURCE = os.path.expanduser('~\\.kivy\\logs')
+
+        shutil.make_archive(OUTPUT, 'zip', SOURCE)
+
+        Notification(
+            title_='Logs exported',
+            message=
+            f'[color={theme.PRIM}]Logs[/color] were exported to [color={theme.PRIM}]{OUTPUT}[/color]',
+            height=160).open()
+
+
+class ConfLastDlls:
+    PATH = '.config/LastDlls.yaml'
+
+    @classmethod
+    def __ensure_file(cls):
+        if not os.path.isfile(cls.PATH):
+            cls.__create_file()
+            return False
+        else:
+            return True
+
+    @classmethod
+    def __create_file(cls):
+        os.makedirs(os.path.dirname(cls.PATH), exist_ok=True)
+        open(cls.PATH, 'w').close()
+
+    @classmethod
+    def __lasts(cls):
+        cls.__ensure_file()
+
+        with open(cls.PATH, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if isinstance(data, dict):
+            return data
+        else:
+            return {}
+
+    @classmethod
+    def set_list(cls, path: str, dlls: list):
+        path = os.path.abspath(path)
+
+        store = cls.__lasts()
+        store[path] = dlls
+
+        with open(cls.PATH, 'w') as stream:
+            stream.write(yaml.dump(store))
+
+    @classmethod
+    def get_list(cls, path):
+        path = os.path.abspath(path)
+
+        try:
+            return cls.__lasts()[path]
+        except KeyError:
+            return False
+
 
 class Conf:
     __store = {}
@@ -1054,7 +1208,13 @@ class Conf:
 
 class XtremeUpdaterApp(App):
     STORE_PATH = '.config/Config.yaml'
-    DEFAULT_STORE = {'mouse_highlight': 1, 'head_decor': 1, 'animations': 1, 'show_disclaimer': 1}
+    DEFAULT_STORE = {
+        'mouse_highlight': 1,
+        'head_decor': 1,
+        'animations': 1,
+        'show_disclaimer': 1,
+        'theme': 'default'
+    }
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -1067,10 +1227,10 @@ class XtremeUpdaterApp(App):
         self.root.goto_page(4)
 
 
-Window.clearcolor = sec
+Window.clearcolor = theme.sec
 
 if __name__ == '__main__':
     app = XtremeUpdaterApp()
     app.run()
 
-__version__ = '0.5.21'
+__version__ = '0.6.0'

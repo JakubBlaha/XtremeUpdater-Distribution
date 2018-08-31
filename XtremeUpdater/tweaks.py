@@ -1,12 +1,20 @@
-import shutil
 import os
-from tempfile import gettempdir
-from hurry.filesize import size
+import shutil
+import platform
 from kivy.app import App
+from kivy.factory import Factory
+from tempfile import gettempdir
+from humanize import naturalsize
 from winreg import *
-
+from main import IS_ADMIN, silent_exc, notify_restart
 
 APP = App.get_running_app()
+
+if platform.machine().endswith('64'):
+    VIEW_FLAG = KEY_WOW64_64KEY
+else:
+    VIEW_FLAG = KEY_WOW64_32KEY
+
 
 def get_size(path):
     total_size = 0
@@ -14,7 +22,7 @@ def get_size(path):
         for f in filenames:
             path = os.path.join(dirpath, f)
             total_size += os.path.getsize(path)
-    
+
     return total_size
 
 
@@ -27,35 +35,99 @@ class Tweaks:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
         finish_size = get_size(tmp_dir)
-        final_size_str = size(init_size - finish_size)
-        final_size_str += '' if final_size_str.endswith('B') else 'B'
+        freed_size = init_size - finish_size
 
         APP.root.bar.ping()
+        Factory.Notification(
+            title_=f'Freed up [color=5f5]{naturalsize(freed_size)}[/color]',
+            message=
+            f'Before: {naturalsize(init_size)}    After: {naturalsize(finish_size)}'
+        ).open()
 
     @staticmethod
     def is_dvr():
-        reg = ConnectRegistry(None, HKEY_CURRENT_USER)
-        key = OpenKey(reg, r'System\GameConfigStore')
+        if platform.release() != '10':
+            return False
+
+        key = OpenKeyEx(HKEY_CURRENT_USER, r'System\GameConfigStore')
         GameDVR_enabled = QueryValueEx(key, 'GameDVR_enabled')[0]
 
-        reg = ConnectRegistry(None, HKEY_LOCAL_MACHINE)
-        key = OpenKey(reg, r'SOFTWARE\Policies\Microsoft\Windows')
+        key = OpenKeyEx(HKEY_LOCAL_MACHINE,
+                        r'SOFTWARE\Policies\Microsoft\Windows\GameDVR')
         try:
-            key = CreateKey(key, 'GameDVR')
             AllowGameDVR = QueryValueEx(key, 'AllowGameDVR')[0]
 
-        except:
+        except OSError:
             AllowGameDVR = 1
 
         return GameDVR_enabled or AllowGameDVR
 
+    @staticmethod
+    @silent_exc
+    @notify_restart
     def switch_dvr(_, enabled):
-        reg = ConnectRegistry(None, HKEY_CURRENT_USER)
-        key = OpenKey(reg, r'System\GameConfigStore', 0, KEY_SET_VALUE)
+        key = OpenKeyEx(HKEY_CURRENT_USER, r'System\GameConfigStore', 0,
+                        KEY_SET_VALUE)
         SetValueEx(key, 'GameDVR_enabled', None, REG_DWORD, enabled)
 
-        reg = ConnectRegistry(None, HKEY_LOCAL_MACHINE)
-        key = OpenKey(reg, r'SOFTWARE\Policies\Microsoft\Windows\GameDVR', 0, KEY_SET_VALUE)
+        key = OpenKeyEx(HKEY_LOCAL_MACHINE,
+                        r'SOFTWARE\Policies\Microsoft\Windows\GameDVR', 0,
+                        KEY_SET_VALUE)
         SetValueEx(key, 'AllowGameDVR', None, REG_DWORD, enabled)
 
-        APP.root.bar.ping()
+    @staticmethod
+    def fth_value():
+        try:
+            key = OpenKey(
+                HKEY_LOCAL_MACHINE,
+                r'SOFTWARE\Microsoft\FTH\State',
+                access=KEY_READ | VIEW_FLAG)
+        except OSError:
+            return False
+
+        try:
+            EnumValue(key, 0)
+        except OSError:
+            return False
+        else:
+            return True
+
+    @staticmethod
+    @silent_exc
+    @notify_restart
+    def clear_fth():
+        APP.root.ids.clear_fth_btn.disabled = True
+
+        key = OpenKey(
+            HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\FTH\State',
+            access=KEY_WRITE | KEY_READ | VIEW_FLAG)
+        while True:
+            try:
+                name = EnumValue(key, 0)[0]
+            except OSError:
+                break
+            else:
+                DeleteValue(key, name)
+
+    @staticmethod
+    def is_fth():
+        try:
+            key = OpenKey(
+                HKEY_LOCAL_MACHINE,
+                r'SOFTWARE\Microsoft\FTH',
+                access=KEY_READ | VIEW_FLAG)
+        except Exception:
+            return False
+        else:
+            return QueryValueEx(key, 'Enabled')[0]
+
+    @staticmethod
+    @silent_exc
+    @notify_restart
+    def switch_fth(__, enabled):
+        key = OpenKey(
+            HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\FTH',
+            access=KEY_WRITE | VIEW_FLAG)
+        SetValueEx(key, 'Enabled', None, REG_DWORD, enabled)
