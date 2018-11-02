@@ -46,18 +46,15 @@ class Tweaks:
 
     @staticmethod
     def is_dvr():
-        if platform.release() != '10':
-            return False
-
         key = OpenKeyEx(HKEY_CURRENT_USER, r'System\GameConfigStore')
         GameDVR_enabled = QueryValueEx(key, 'GameDVR_enabled')[0]
 
-        key = OpenKeyEx(HKEY_LOCAL_MACHINE,
-                        r'SOFTWARE\Policies\Microsoft\Windows\GameDVR')
         try:
+            key = OpenKeyEx(HKEY_LOCAL_MACHINE,
+                        r'SOFTWARE\Policies\Microsoft\Windows\GameDVR')
             AllowGameDVR = QueryValueEx(key, 'AllowGameDVR')[0]
 
-        except OSError:
+        except (OSError, FileNotFoundError):
             AllowGameDVR = 1
 
         return GameDVR_enabled or AllowGameDVR
