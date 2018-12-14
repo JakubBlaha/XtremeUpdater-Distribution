@@ -37,7 +37,7 @@ RootLayout:
     padding: 10, 5
     color: theme.prim
     markup: True
-    noise_color: Window.clearcolor
+    noise_color: theme.sec
 
 <ContentLayout@BoxLayout+NoiseTexture>:
     orientation: 'vertical'
@@ -54,7 +54,7 @@ RootLayout:
 <HeaderButton@CustButton+NoiseTexture>:
     size_hint_x: None
     width: self.height
-    noise_color: Window.clearcolor
+    noise_color: theme.sec
 
 <IconButton@CustButton>:
     size_hint_x: None
@@ -140,8 +140,8 @@ RootLayout:
     valign: 'center'
     padding: 40, 0
     color: theme.fg
-    hovering_attrs: {'over_color_alpha': .1}
-    anim_kw: {'d': .05}
+    hovering_attrs: {'over_color_alpha': .05}
+    anim_kw: {'d': 0}
 
     canvas.after:
         Color:
@@ -314,7 +314,7 @@ RootLayout:
     size_hint_x: 1
     background_color: theme.dark
     foreground_color: theme.sec
-    on_text_validate: app.root.load_dll_view_data(self.text)
+    on_text_validate: app.root.request_load_dlls(self.text)
 
 <SyncPopup>:
     size_hint: 1, None
@@ -377,6 +377,17 @@ RootLayout:
         Rectangle:
             group: 'blur'
             size: Window.size
+
+    canvas:
+        Color:
+            rgba: 1, 1, 1, 1
+
+        Rectangle:
+            group: 'icon'
+            pos: self.pos
+            size: root._icon_tex.size if root._icon_tex else (0, 0)
+            texture: root._icon_tex
+            
 
     canvas.after:
         Color:
@@ -602,6 +613,7 @@ RootLayout:
         text_size: self.size
         valign: 'center'
         padding: 10, 0
+        markup: True
 
 <WorkingBar>:
     canvas:
@@ -623,10 +635,10 @@ RootLayout:
     height: 100
     text_size: self.size
     halign: 'center'
-    background_color: theme.sec
-    hovering_attrs: {'background_color': theme.sec}
+    background_color: theme.dark
+    hovering_attrs: {'color': theme.prim}
     underline: True
-    color: [i + .2 for i in theme.sec[:-1]] + [1]
+    color: [i + .2 for i in theme.dark[:-1]] + [1]
     padding_y: 40
 
 <ThemeSwitcher>:
@@ -670,6 +682,37 @@ RootLayout:
         background_color: theme.sec
         size_hint_x: None
         width: 40
+
+<WorkingNotif>:
+    pos_hint: {'top': (Window.height + self.height) / Window.height, 'x': 0}
+    size_hint_y: None
+    height: 30
+    background: 'img/FFFFFF-0.png'
+    background_color: 0, 0, 0, 0
+
+    Label:
+        text: root.text + " ..."
+        text_size: self.size
+        valign: 'center'
+        padding: 10, 0
+        color: theme.fg
+        bold: True
+
+        canvas.before:
+            Color:
+                rgba: theme.sec
+
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+            Color:
+                rgb: theme.prim
+                a: root._highlight_alpha
+
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
 <RootLayout>:
     orientation: 'vertical'
@@ -907,6 +950,11 @@ RootLayout:
                     ThemeSwitcher:
 
                     LabelSwitch:
+                        text: 'Show [i]Run as admin[/i] button'
+                        active_callback: lambda __, value: setattr(root, 'run_as_admin_shown', value)
+                        active: root.run_as_admin_shown
+
+                    LabelSwitch:
                         text: 'Enable animations'
                         active_callback: root.switch_animations_enabled
                         active: conf.animations
@@ -940,7 +988,7 @@ RootLayout:
                     LabelIconButton:
                         text: 'Show license'
                         icon: '\ue785'
-                        command: Factory.DisclaimerPopup().open
+                        command: lambda: Factory.DisclaimerPopup().open()
 
                     SectionLabel:
                         text: 'Danger zone'
