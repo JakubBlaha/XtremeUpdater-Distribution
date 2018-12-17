@@ -5,3 +5,8 @@ __pycache__/
 .config/
 .backup/
 logs/
+
+.cache
+.config
+.backup
+logs
