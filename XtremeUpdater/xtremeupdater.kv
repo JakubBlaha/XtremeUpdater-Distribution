@@ -1,34 +1,22 @@
 #:kivy 1.10.1
 
-#:import main main
-#:import conf main.conf
-#:import theme main.theme
 #:import Window kivy.core.window.Window
 #:import Tweaks tweaks.Tweaks
 #:import get_version_number get_version_number.get_version_number
 #:import startfile os.startfile
-#:import version main.__version__
-#:import __file__ main.__file__
 #:import dirname os.path.dirname
 #:import Factory kivy.factory.Factory
 #:import platform platform
+#:import uninstall uninstall.uninstall
+
+#:import TweaksManager uix.tweaks_manager.TweaksManager
+
+#:set Config app.Config
+#:set version app.version
+#:set theme app.theme
+#:set as_admin app.as_admin
 
 RootLayout:
-<CustButton>:
-    background_normal: 'img/FFFFFF-1.png'
-    background_disabled_normal: self.background_normal
-    background_down: self.background_normal
-    background_disabled_down: self.background_normal
-    background_color: 0, 0, 0, 0
-    hovering_attrs: {'color': theme.prim}
-    anim_kw: {'d': .1}
-    border: 0, 0, 0, 0
-
-<BackgroundedButton>:
-    background_color: theme.bg
-    hovering_attrs: {'background_color': theme.dark}
-    font_size: 24
-
 <HeaderLabel>:
     text: '[color=ddd]Xtreme[/color]Updater'
     font_name: 'fnt/Roboto-Black.ttf'
@@ -51,16 +39,78 @@ RootLayout:
             pos: self.pos
             size: self.size
 
-<HeaderButton@CustButton+NoiseTexture>:
-    size_hint_x: None
-    width: self.height
-    noise_color: theme.sec
+# BUTTONS
+<CustButton>:
+    background_normal: 'img/FFFFFF-1.png'
+    background_disabled_normal: self.background_normal
+    background_down: self.background_normal
+    background_disabled_down: self.background_normal
+    background_color: 0, 0, 0, 0
+    hovering_attrs: {'color': theme.prim}
+    anim_kw: {'d': .1}
+    border: 0, 0, 0, 0
+    # opacity: .5 if self.disabled else 1
+    color: self.color[:-1] + [1 - self.disabled * .5]
 
-<IconButton@CustButton>:
+<BackgroundedButton>:
+    background_color: theme.bg
+    hovering_attrs: {'background_color': theme.dark}
+    font_size: 24
+
+<IconButton>:
     size_hint_x: None
-    width: self.height
+    width: 60
     font_name: 'fnt/segmdl2.ttf'
     font_size: 20
+    text: self.icon
+
+<LabelIconButton>:
+    size_hint: None, None
+    size: 340, 40
+    on_release: self.command() if callable(self.command) else None # TODO dirty fix!
+    text_size: self.size
+    halign: 'left'
+    valign: 'center'
+    padding: (self._btn_width - self.font_size) / 2, 0
+    _btn_width: self.height
+
+    canvas.before:
+        # Label bg
+        Color:
+            rgba: theme.bg
+        Rectangle:
+            pos: self.pos
+            size: self.size
+        # Button bg
+        Color:
+            rgba: theme.sec
+        Rectangle:
+            pos: self.pos
+            size: self._btn_width, self.height
+
+    Label:
+        text: root.text_
+        text_size: self.size
+        valign: 'center'
+        padding: root.height + 10, 0
+        markup: True
+        pos: root.pos
+        size: root.size
+        opacity: root.opacity_
+
+    Label:
+        text: root.warning_icon
+        font_name: 'fnt/segmdl2.ttf'
+        font_size: 20
+        pos: root.pos
+        size: root.size
+        text_size: self.size
+        halign: 'right'
+        padding: 10, 8
+        color: {1: (1, 1, 0, 1), 2: (1, .3, .3, 1)}.get(root.warning_level, (0, 0, 0, 0))
+
+<ExpandableLabelIconButton>:
+    _btn_width: 340
 
 <NavigationButton>:
     markup: True
@@ -82,7 +132,84 @@ RootLayout:
 <IconNavigationButton@IconButton+NavigationButton>:
     font_size: 18
     icon: self.text
+    width: self.height
 
+<HeaderButton@CustButton+NoiseTexture>:
+    size_hint_x: None
+    width: self.height
+    noise_color: theme.sec
+
+# SWITCHES
+<CustSwitch>:
+    size_hint: None, None
+    size: 40, 40
+    canvas:
+        Color:
+            rgba: theme.prim
+
+        Rectangle:
+            size: self.height / 2, self.height
+            pos: self.pos
+
+        Color:
+            rgba: theme.bg
+
+        Rectangle:
+            size: self.height / 2, self.height
+            pos: self.x + self.height / 2, self.y
+
+        Color:
+            rgba: theme.sec
+
+        Rectangle:
+            source: 'img/FFFFFF-1.png'
+            size: 20, self.height + 6
+            pos: self.x + self._switch_x_normal * self.height / 2, self.y - 3
+
+    Label:
+        text: '\ue72e'
+        font_name: 'fnt/segmdl2.ttf'
+        font_size: 16
+        pos: root.x + root._switch_x_normal * root.height / 2, root.y + 4
+        size: 20, 10
+        opacity: float(root.disabled)
+        color: theme.bg
+
+<LabelSwitch>:
+    size_hint: None, None
+    size: 340, 40
+
+    canvas.before:
+        Color:
+            rgba: theme.bg
+
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    Label:
+        id: text_label
+        text: root.text
+        text_size: self.size
+        valign: 'center'
+        padding: root.height + 10, 0
+        markup: True
+        pos: root.pos
+        size: root.size
+        # opacity: .8 if root.disabled else 1
+
+    Label:
+        text: root.warning_icon
+        font_name: 'fnt/segmdl2.ttf'
+        font_size: 20
+        pos: root.pos
+        size: root.size
+        text_size: self.size
+        halign: 'right'
+        padding: 10, 8
+        color: {1: (1, 1, 0, 1), 2: (1, .3, .3, 1)}.get(root.warning_level, (0, 0, 0, 0))
+
+# ---------
 <Navigation>:
     size_hint_y: None
     height: 40
@@ -167,7 +294,7 @@ RootLayout:
     bar_color: theme.sec
     bar_inactive_color: [0, 0, 0, 0]
     scroll_type: ['content', 'bars']
-    smooth: conf.animations
+    smooth: Config.get('animations', True)
 
 <DllView>:
     viewclass: 'DllViewItem'
@@ -246,36 +373,6 @@ RootLayout:
         id: board
         size_hint_y: None
         height: self.minimum_height
-
-<LabelIconButton>:
-    command: lambda: None
-    font_size: 16
-
-    canvas.before:
-        Color:
-            rgba: theme.bg
-
-        Rectangle:
-            pos: self.pos
-            size: self.size
-
-    size_hint: None, None
-    size: 340, 40
-
-    IconButton:
-        id: button
-        text: root.icon
-        on_release: root.command()
-        background_color: theme.sec
-
-    Label:
-        id: label
-        padding: 10, 0
-        text: root.text
-        markup: True
-        text_size: self.size
-        valign: 'center'
-        font_size: root.font_size
 
 <SectionLabel@Label>:
     color: theme.sec
@@ -458,7 +555,7 @@ RootLayout:
 
     AcceptDecliene:
         pos: root.x + root.width - self.width - 10, root.y + 10
-        proceed_command: app.root.uninstall
+        proceed_command: uninstall
         decline_command: root.dismiss
 
 <DisclaimerPopup@CustPopup>:
@@ -472,7 +569,7 @@ RootLayout:
         orientation: 'vertical'
 
         Label:
-            text: open(dirname(__file__) + '\\LICENSE').read()
+            text: open('LICENSE').read()
             text_size: self.size
             padding: 10, 0
             size_hint_x: None
@@ -489,6 +586,31 @@ RootLayout:
                 size_hint: None, None
                 size: 200, 40
 
+            Widget:
+
+<UpdateRestartPopup@CustPopup>:
+    title: f'[color={theme.PRIM}]Restart[/color] required'
+    separator_color: theme.prim
+    icon: '\ue896'
+    auto_dismiss: False
+
+    BoxLayout:
+        orientation: 'vertical'
+
+        Label:
+            text: f'We need to restart [color={theme.PRIM}]XtremeUpdater[/color] in order to apply an update. Click below to continue.'
+            markup: True
+            text_size: self.size
+            valign: 'top'
+            padding: 10, 10
+
+        BoxLayout:
+            Widget:
+            BackgroundedButton:
+                text: 'Restart'
+                on_release: app._restart_for_update()
+                size_hint: None, None
+                size: 200, 40
             Widget:
 
 <Notification>:
@@ -554,66 +676,6 @@ RootLayout:
         padding_x: 10
         opacity: root._btn_opacity
         color: 1, 1, 1, .8
-
-<CustSwitch>:
-    size_hint: None, None
-    size: 40, 40
-    canvas:
-        Color:
-            rgba: theme.prim
-
-        Rectangle:
-            size: self.width / 2, self.height
-            pos: self.pos
-
-        Color:
-            rgba: theme.bg
-
-        Rectangle:
-            size: self.width / 2, self.height
-            pos: self.x + self.width / 2, self.y
-
-        Color:
-            rgba: theme.sec
-
-        Rectangle:
-            source: 'img/FFFFFF-1.png'
-            size: 20, self.height + 6
-            pos: self.x + self._switch_x, self.y - 3
-
-    Label:
-        text: '\ue72e'
-        font_name: 'fnt/segmdl2.ttf'
-        pos: root.x + root._switch_x, root.y + 4
-        size: 20, 10
-        opacity: float(root.disabled)
-        color: theme.bg
-        font_size: 16
-
-<LabelSwitch>:
-    size_hint: 0, 0
-    size: 340, 40
-
-    canvas:
-        Color:
-            rgba: theme.bg
-
-        Rectangle:
-            pos: self.pos
-            size: self.size
-
-    CustSwitch:
-        id: switch
-        size_hint_x: None
-        color: theme.prim
-        active: root.active
-
-    Label:
-        text: root.text
-        text_size: self.size
-        valign: 'center'
-        padding: 10, 0
-        markup: True
 
 <WorkingBar>:
     canvas:
@@ -720,11 +782,12 @@ RootLayout:
     canvas.after:
         Color:
             rgb: theme.prim
+            a: self._highlight_alpha if self._can_highlight else 0
 
         Rectangle:
             group: 'mouse_highlight'
             source: 'img/mouse_highlight.png'
-            pos: self.mouse_highlight_pos
+            pos: self._mouse_highlight_pos
             size: 120, 120
 
     BoxLayout:
@@ -772,7 +835,7 @@ RootLayout:
 
     Content:
         id: content
-        anim_kwargs: {'t': 'out_expo', 'd': .5 * conf.animations}
+        anim_kwargs: {'t': 'out_expo', 'd': .5 * Config.get('animations', True)}
         commands: {2: lambda: Factory.IsAdminNotif().open()}
 
         ContentLayout:
@@ -859,48 +922,10 @@ RootLayout:
 
         ContentLayout:
             id: content_system
-            
+
             SmoothScrollView:
-                BoxLayout:
-                    orientation: 'vertical'
-                    padding: 10, 40
-                    spacing: 10
-                    size_hint_y: None
-                    height: self.minimum_height
-
-                    SectionLabel:
-                        text: 'Temporary files'
-
-                    LabelIconButton:
-                        text: "Clear user's temp folder"
-                        icon: '\ue74d'
-                        command: Tweaks.clear_temps
-
-                    SectionLabel:
-                        text: 'Xbox GameDVR'
-
-                    LabelSwitch:
-                        text: 'Allow GameDVR'
-                        active_callback: Tweaks.switch_dvr
-                        active: Tweaks.is_dvr()
-                        disabled: not main.IS_ADMIN or platform.release() != '10'
-
-                    SectionLabel:
-                        text: 'Fault Tolerant Heap'
-                    
-                    SectionBox:
-                        LabelSwitch:
-                            text: 'Enable FTH'
-                            active_callback: Tweaks.switch_fth
-                            active: Tweaks.is_fth()
-                            disabled: not main.IS_ADMIN
-
-                        LabelIconButton:
-                            id: clear_fth_btn
-                            text: 'Clear FTH'
-                            icon: '\ue74c'
-                            disabled: not (Tweaks.fth_value() and main.IS_ADMIN)
-                            command: Tweaks.clear_fth
+                TweaksManager:
+                    tweaks: Tweaks.tweaks
 
         ContentLayout:
             id: content_settings
@@ -917,22 +942,22 @@ RootLayout:
                         text: 'Support'
 
                     LabelIconButton:
-                        text: 'Get a help'
+                        text_: 'Get a help'
                         icon: '\ue897'
                         command: lambda: startfile('https://discord.gg/Cs4rstF')
 
                     LabelIconButton:
-                        text: 'Request a feature'
+                        text_: 'Request a feature'
                         icon: '\ue943'
                         command: lambda: startfile('https://discord.gg/rdwCuge')
 
                     LabelIconButton:
-                        text: 'Report a bug'
+                        text_: 'Report a bug'
                         icon: '\uebe8'
                         command: lambda: startfile('https://discord.gg/sfcBuMU')
 
                     LabelIconButton:
-                        text: 'Export logs'
+                        text_: 'Export logs'
                         icon: '\ue9f9'
                         command: root.export_logs
 
@@ -940,7 +965,7 @@ RootLayout:
                         text: 'Buy us a coffee'
                     
                     LabelIconButton:
-                        text: 'Donate | not yet'
+                        text_: 'Donate | not yet'
                         icon: '\ueb51'
                         disabled: True
 
@@ -951,34 +976,34 @@ RootLayout:
 
                     LabelSwitch:
                         text: 'Show [i]Run as admin[/i] button'
-                        active_callback: lambda __, value: setattr(root, 'run_as_admin_shown', value)
+                        command: lambda __, value: setattr(root, 'run_as_admin_shown', value)
                         active: root.run_as_admin_shown
 
                     LabelSwitch:
                         text: 'Enable animations'
-                        active_callback: root.switch_animations_enabled
-                        active: conf.animations
+                        command: root.switch_animations_enabled
+                        active: Config.get('animations', True)
 
                     LabelSwitch:
                         text: 'Enable mouse highlight'
-                        active_callback: root.switch_mouse_highlight
-                        active: conf.mouse_highlight
+                        command: lambda __, is_on: setattr(root, 'mouse_highlight', is_on)
+                        active: Config.get('mouse_highlight', False)
 
                     LabelSwitch:
                         text: 'Decorate head'
-                        active_callback: lambda __, value: setattr(root.ids.header_label, 'decor_enabled', value)
-                        active: conf.head_decor
+                        command: lambda __, value: setattr(root.ids.header_label, 'decor_enabled', value)
+                        active: Config.head_decor
 
                     SectionLabel:
                         text: 'Cache'
 
                     LabelIconButton:
-                        text: f"Clear cached images"
+                        text_: f"Clear cached images"
                         icon: '\ueb9f'
                         command: root.clear_images_cache
 
                     LabelIconButton:
-                        text: "Clear cached game database"
+                        text_: "Clear cached game database"
                         icon: '\ueda2'
                         command: root.clear_common_paths_cache
 
@@ -986,7 +1011,7 @@ RootLayout:
                         text: 'License'
                     
                     LabelIconButton:
-                        text: 'Show license'
+                        text_: 'Show license'
                         icon: '\ue785'
                         command: lambda: Factory.DisclaimerPopup().open()
 
@@ -995,12 +1020,12 @@ RootLayout:
                         color: 1, .3, .3, 1
 
                     LabelIconButton:
-                        text: f'Reset [color={theme.PRIM}][i]Game Collection[/i][/color]'
+                        text_: f'Reset [color={theme.PRIM}][i]Game Collection[/i][/color]'
                         icon: '\ue777'
                         command: root.reset_custom_paths
 
                     LabelIconButton:
-                        text: 'Uninstall'
+                        text_: 'Uninstall'
                         icon: '\uecc9'
                         command: root.uninstall_prompt
 
@@ -1032,12 +1057,12 @@ RootLayout:
                     SectionLabel:
                         text: 'Game dll directory'
                     
-                    LabelIconButton:
+                    ExpandableLabelIconButton:
                         id: game_add_form_dir
-                        text: ''
+                        text_: ''
                         icon: '\uf12b'
                         command: root.game_path_button_callback
-                        font_size: 11
+                        font_size_: 11
 
                     SectionLabel:
                         text: 'Game launchable file / URL'
@@ -1047,13 +1072,13 @@ RootLayout:
                         height: 40
                         spacing: self.parent.padding[0]
 
-                        LabelIconButton:
+                        ExpandableLabelIconButton:
                             id: game_add_form_launch
-                            text: ''
+                            text_: ''
                             icon: '\ue7c3'
                             disabled: bool(url_input.text)
                             command: root.game_launch_path_button_callback
-                            font_size: 11
+                            font_size_: 11
 
                         CustTextInput:
                             id: url_input

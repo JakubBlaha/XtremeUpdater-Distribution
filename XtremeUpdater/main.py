@@ -1,3 +1,5 @@
+__version__ = '0.7.3'
+
 import easygui
 import yaml
 import os
@@ -15,16 +17,16 @@ from io import BytesIO
 import kivy
 kivy.require('1.10.1')
 
-from kivy import Config
-Config.set('graphics', 'width', 1000)
-Config.set('graphics', 'height', 550)
-Config.set('graphics', 'borderless', 1)
-Config.set('graphics', 'resizable', 0)
-Config.set('graphics', 'multisamples', 0)
-Config.set('graphics', 'maxfps', 60)
-Config.set('input', 'mouse', 'mouse, disable_multitouch')
-Config.set('kivy', 'window_icon', 'img/icon.ico')
-Config.set('kivy', 'log_dir', os.getcwd() + '/logs')
+from kivy import Config as KivyConfig
+KivyConfig.set('graphics', 'width', 1000)
+KivyConfig.set('graphics', 'height', 550)
+KivyConfig.set('graphics', 'borderless', 1)
+KivyConfig.set('graphics', 'resizable', 0)
+KivyConfig.set('graphics', 'multisamples', 0)
+KivyConfig.set('graphics', 'maxfps', 60)
+KivyConfig.set('input', 'mouse', 'mouse, disable_multitouch')
+KivyConfig.set('kivy', 'window_icon', 'img/icon.ico')
+KivyConfig.set('kivy', 'log_dir', os.getcwd() + '/logs')
 
 from kivy.app import App
 from kivy.logger import Logger
@@ -41,7 +43,6 @@ from kivy.uix.button import Button
 from kivy.uix.image import CoreImage
 from kivy.uix.spinner import Spinner
 from custpagelayout import PageLayout
-from ignoretouch import IgnoreTouchBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.graphics.texture import Texture
@@ -53,26 +54,25 @@ from kivy.uix.label import Label, CoreLabel
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.textinput import TextInput
 from kivy.properties import StringProperty, ObjectProperty, DictProperty, ListProperty, NumericProperty, BooleanProperty
+from kivy.event import EventDispatcher
+from kivy.metrics import sp
+
+# custom uix
+from uix.notifications import Notification, WorkingNotif
 
 from hovering import HoveringBehavior
 from windowdragbehavior import WindowDragBehavior
-
+from behaviors.warning_behavior import WarningBehavior
 from theme import Theme
-from config import Conf
+from config import Config
+Config.reload_store()
 from dll_updater import DllUpdater
 from fontcolor import font_color
 from get_image_url import get_image_url_from_response, TEMPLATE, HEADERS
 from cropped_thumbnail import cropped_thumbnail
+from update_client import UpdateClient
 
 IS_ADMIN = ctypes.windll.shell32.IsUserAnAdmin()
-STORE_PATH = '.config/config.yaml'
-DEFAULT_STORE = {
-    'mouse_highlight': 1,
-    'head_decor': 1,
-    'animations': 1,
-    'show_disclaimer': 1,
-    'theme': 'default'
-}
 
 
 def new_thread(fn):
@@ -108,6 +108,77 @@ def notify_restart(fn):
     return wrapper
 
 
+def refer_func(fn):
+    '''
+    Passes the function as an argument to the function itself. Can be used for
+    referring itself.
+    '''
+
+    def wrapper(*args, **kw):
+        return fn(fn, *args, **kw)
+
+    return wrapper
+
+
+# UIX TODO: move to individual files
+# BUTTONS
+class CustButton(Button, HoveringBehavior):
+    disabled = BooleanProperty(False)
+
+
+class BackgroundedButton(CustButton):
+    pass
+
+
+class IconButton(CustButton):
+    icon = StringProperty()
+
+
+class LabelIconButton(IconButton, WarningBehavior):
+    text_ = StringProperty()  # Label text
+    font_size_ = NumericProperty(sp(15))  # Label font_size
+    opacity_ = NumericProperty(1)  # Label opacity
+
+    _btn_width = NumericProperty()
+
+class ExpandableLabelIconButton(LabelIconButton):
+    def on_text_(self, __, text):
+        if not App.get_running_app().built:  # Do not waste resources
+            Animation(
+                _btn_width=self.height if text else self.width,
+                opacity_=1 if text else 0,
+                d=.5,
+                t='out_expo').start(self)
+        else:
+            self._btn_width = self.height if text else self.width
+            self.opacity_ = 1 if text else 0
+
+
+# SWITCHES
+class CustSwitch(Widget):
+    active = BooleanProperty(False)
+    command = ObjectProperty()
+    disabled = BooleanProperty(False)
+
+    # Internal use
+    _switch_x_normal = NumericProperty(0)
+
+    def on_active(self, *args):
+        Animation(_switch_x_normal=self.active, d=.2, t='out_expo').start(self)
+
+    def on_touch_down(self, touch):
+        if not (self.collide_point(*touch.pos)
+                and callable(self.command)) or self.disabled:
+            return
+
+        if self.command(None, not self.active) is not False:
+            self.active = not self.active
+
+
+class LabelSwitch(CustSwitch, WarningBehavior):
+    text = StringProperty()
+
+
 class CustTextInput(TextInput):
     pass
 
@@ -133,7 +204,7 @@ class Animation(Animation):
     def __init__(self, **kw):
         super().__init__(**kw)
         try:
-            self._duration *= conf.animations
+            self._duration *= Config.get('animations', True)
         except (NameError, AttributeError):
             pass
 
@@ -176,17 +247,17 @@ class HeaderLabel(Label, WindowDragBehavior, NoiseTexture):
     def __init__(self, **kw):
         super().__init__(**kw)
 
-        self.decor_enabled = conf.head_decor
+        self.decor_enabled = Config.get('head_decor', True)
 
         if self.decor_enabled:
             Clock.schedule_once(
                 lambda *args: Clock.schedule_once(self.setup_decor))
 
-            if conf.animations:
+            if Config.get('animations', True):
                 Clock.schedule_once(lambda *args: Clock.schedule_interval(self.random_decor_rotation, .5))
 
     def on_decor_enabled(self, __, value):
-        conf.head_decor = value
+        Config.head_decor = value
 
         if value:
             self.setup_decor()
@@ -254,86 +325,6 @@ class HeaderLabel(Label, WindowDragBehavior, NoiseTexture):
         self.canvas.remove_group('decor')
 
 
-class CustButton(Button, HoveringBehavior):
-    _orig_font_opacity = 1
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.orig_font_opacity = self.color[3]
-
-    def on_disabled(self, *args):
-        if self.disabled:
-            self._orig_font_opacity = self.color[3]
-            Animation(color=self.color[:3] + [.1], d=.1).start(self)
-            if self.hovering:
-                self.on_leave()
-
-        else:
-            Animation(
-                color=self.color[:3] + [self._orig_font_opacity],
-                d=.1).start(self)
-            if self.hovering:
-                self.on_enter()
-
-
-class BackgroundedButton(CustButton):
-    pass
-
-
-class LabelIconButton(BoxLayout):
-    text = StringProperty()
-    icon = StringProperty()
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-
-        def on_frame(*args):
-            self.ids.label.bind(text=self.on_label_text)
-            self.on_label_text()
-
-        Clock.schedule_once(on_frame)
-
-    def on_label_text(self, *args):
-        if self.ids.label.text:
-            Animation(width=40, d=.5, t='out_expo').start(self.ids.button)
-            Animation(opacity=1, d=.5).start(self.ids.label)
-
-        else:
-            Animation(
-                width=self.width, d=.5, t='out_expo').start(self.ids.button)
-            self.ids.label.opacity = 0
-
-
-class CustSwitch(Widget):
-    active = BooleanProperty(False)
-    _switch_x = NumericProperty(0)
-
-    def on_active(self, *args):
-        self.trigger_switch()
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            self.active = not self.active
-            self.trigger_switch()
-
-    def trigger_switch(self):
-        Animation(_switch_x=self.active * 20, d=.2, t='out_expo').start(self)
-
-
-class LabelSwitch(BoxLayout):
-    text = StringProperty()
-    active = BooleanProperty()
-    active_callback = ObjectProperty(lambda *args: None)
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-
-        def on_frame(*args):
-            self.ids.switch.bind(active=self.active_callback)
-
-        Clock.schedule_once(on_frame)
-
-
 class OverdrawLabel(FloatLayout):
     icon = StringProperty()
     text = StringProperty()
@@ -354,7 +345,7 @@ class OverdrawLabel(FloatLayout):
 
         Animation.stop_all(self)
         Animation(opacity=1, d=.2).start(self)
-        if conf.animations:
+        if Config.get('animations', True):
             anim = (
                 Animation(angle=self.__MAX_TILT, d=.3, t='in_out_expo') +
                 Animation(angle=0, d=1, t='out_elastic') + Animation(d=2) +
@@ -531,8 +522,7 @@ class CustPopup(Popup):
         img = img.filter(ImageFilter.GaussianBlur(50))
 
         tex = Texture.create(size=img.size)
-        tex.blit_buffer(
-            pbuffer=img.tobytes(), size=img.size, colorfmt='rgba')
+        tex.blit_buffer(pbuffer=img.tobytes(), size=img.size, colorfmt='rgba')
         tex.flip_vertical()
         self.canvas.before.get_group('blur')[0].texture = tex
 
@@ -911,13 +901,13 @@ class DllView(RecycleView):
             child.refresh_hovering()
 
 
-class SyncPopup(Popup, NoiseTexture, IgnoreTouchBehavior):
+class SyncPopup(Popup, NoiseTexture):
     icon_rotation = NumericProperty()
 
     def __init__(self, **kw):
         super().__init__(**kw)
 
-        if conf.animations:
+        if Config.get('animations', True):
             Clock.schedule_interval(self.rotate_icon, 2)
 
     def rotate_icon(self, *args):
@@ -994,49 +984,6 @@ class WorkingBar(Widget):
         Animation(_x1=0, _x2=value, d=.5, t='out_expo').start(self)
 
 
-class Notification(Popup, IgnoreTouchBehavior):
-    title_ = StringProperty('Notification')
-    message = StringProperty('Example message')
-    _decor_size = ListProperty([6, 20])
-    _bg_offset = NumericProperty(-200)
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-
-        self.children[0].children[2].markup = True
-
-        is_notif = hasattr(app, 'curr_notif')
-
-        if is_notif:
-            app.curr_notif.dismiss()
-
-        app.curr_notif = self
-
-        anim = (
-            Animation(_decor_size=[self._decor_size[0], 0], d=0) + Animation(
-                opacity=1,
-                _bg_offset=0,
-                _decor_size=self._decor_size,
-                d=.5,
-                t='out_expo'))
-
-        Clock.schedule_once(lambda *args: anim.start(self), is_notif * .5)
-        Clock.schedule_once(self.dismiss, is_notif * .5 + 3)
-
-    def dismiss(self, *args):
-        anim = Animation(
-            opacity=0, _bg_offset=200, _decor_size=[0, 0], d=.5, t='in_expo')
-        anim.bind(
-            on_complete=lambda *args: super(Notification, self).dismiss())
-        anim.start(self)
-
-        try:
-            if app.curr_notif is self:
-                del app.curr_notif
-        except AttributeError:
-            pass
-
-
 class IsAdminNotif(Notification):
     title_template = '{} as admin'
     message_template = '{} tweaks are available.'
@@ -1057,7 +1004,6 @@ class RunAsAdminButton(ModalView, HoveringBehavior):
     _disp_icon = NumericProperty(1)
     _btn_opacity = NumericProperty(1)
     _border_template = [
-        [0, 1, 0, 1, 0, 1],
         [0, 1, 1, 1, 1, 1],
         [0, 1, 1, 1, 1, 0],
         [1, 1, 1, 1, 1, 0],
@@ -1065,15 +1011,16 @@ class RunAsAdminButton(ModalView, HoveringBehavior):
         [1, 0, 0, 0, 0, 0],
         [1, 0, 0, 0, 0, 1],
         [0, 0, 0, 0, 0, 1],
+        [0, 1, 0, 1, 0, 1],
     ]
 
     def __init__(self, **kw):
         super().__init__(**kw)
 
-        if not conf.animations:
+        if not Config.get('animations', True):
             return
 
-        anim = Animation(d=0)
+        anim = Animation(d=1)
         for points in self._border_template:
             anim += Animation(_border_points=points, d=.3, t='in_out_quint')
 
@@ -1142,7 +1089,7 @@ class ThemeSwitcher(BoxLayout):
                 display_height=self.height, d=.2, t='out_expo')).start(self)
 
     def on_theme(self, __, theme_):
-        theme_.set_theme()
+        Config.theme = theme_.name
         self.display_colors = list(theme_.get_values_kivy_color().values())
 
         def on_complete(*args):
@@ -1153,9 +1100,9 @@ class ThemeSwitcher(BoxLayout):
         anim.bind(on_complete=on_complete)
         anim.start(self.ids.label)
 
-        if self.theme.name != theme.name:
+        if theme_.name != theme.name:
             Notification(
-                title='Restart required',
+                title_='Restart required',
                 message=
                 f'Please [color={theme.PRIM}]restart[/color] XtremeUpdater to set the new theme.'
             ).open()
@@ -1170,54 +1117,73 @@ class ThemeSwitcher(BoxLayout):
         self.themes.append(self.themes.pop(0))
 
 
-class WorkingNotif(ModalView, IgnoreTouchBehavior):
-    text = StringProperty()
-
-    _highlight_alpha = NumericProperty(.8)
-
-    def open(self, *args, **kw):
-        if not kw.get('animation', True):
-            self.pos_hint = {'top': 1}
-        return super().open(*args, **kw)
-
-    def on_open(self):
-        # Come-in animation
-        Animation(pos_hint={'top': 1}, d=.5, t='out_expo').start(self)
-
-        # Bg flashing animation
-        anim = (Animation(_highlight_alpha=.8, t="out_expo") + Animation(
-            _highlight_alpha=0, t="out_expo"))
-        anim.repeat = True
-        anim.start(self)
-
-    def dismiss(self, *args):
-        # Come-out animation
-        anim = Animation(
-            pos_hint={'top': (Window.height + self.height) / Window.height},
-            d=.5,
-            t='out_expo')
-        anim.bind(
-            on_complete=lambda *__: super(WorkingNotif, self).dismiss(args))
-        anim.start(self)
-
-
 class RootLayout(BoxLayout, HoveringBehavior):
-    mouse_highlight_pos = ListProperty([-120, -120])
     dlls_loaded = BooleanProperty(False)
     listed_dlls = ListProperty()
     path = StringProperty()
+
+    # mouse highlight
+    _mouse_highlight_pos = ListProperty((0, 0))
+    _highlight_alpha = NumericProperty()
+    _mouse_highlight_anim = Animation()
+    _can_highlight = BooleanProperty(False)
+
+    # options
+    mouse_highlight = BooleanProperty(Config.get('mouse_highlight', True))
 
     def __init__(self, **kw):
         super().__init__(**kw)
 
         self.bar = self.ids.bar
-        self.switch_mouse_highlight(None, conf.mouse_highlight)
 
+        # mouse highlight
+        self.on_mouse_highlight(None, self.mouse_highlight)
+
+        def callback(*__):
+            if self.mouse_highlight:
+                self._highlight_alpha = 0
+                self._can_highlight = True
+                self._show_highlight()
+                Window.unbind(mouse_pos=callback)
+
+        Window.bind(mouse_pos=callback)
+
+        # sync
         def on_frame(*args):
             self.show_sync_popup()
             self.setup_updater()
 
         Clock.schedule_once(on_frame)
+
+    # mouse highlight
+    def _show_highlight(self, *__):
+        self._mouse_highlight_anim.stop(self)
+        self._mouse_highlight_anim = Animation(_highlight_alpha=1, d=.1)
+        self._mouse_highlight_anim.start(self)
+
+    def _hide_highlight(self, *__):
+        self._mouse_highlight_anim.stop(self)
+        self._mouse_highlight_anim = Animation(_highlight_alpha=0, d=.2)
+        self._mouse_highlight_anim.start(self)
+
+    def _update_highlight(self, __, pos):
+        self._mouse_highlight_pos = pos[0] - 60, pos[1] - 60
+
+    def on_mouse_highlight(self, __, is_on):
+        if is_on:
+            Window.bind(
+                mouse_pos=self._update_highlight,
+                on_cursor_enter=self._show_highlight,
+                on_cursor_leave=self._hide_highlight)
+            self._update_highlight(Window, Window.mouse_pos)
+            self._show_highlight()
+        else:
+            Window.unbind(
+                mouse_pos=self._update_highlight,
+                on_cursor_enter=self._show_highlight,
+                on_cursor_leave=self._hide_highlight)
+            self._hide_highlight()
+        Config.mouse_highlight = is_on
 
     def show_sync_popup(self):
         self.sync_popup = SyncPopup()
@@ -1255,22 +1221,8 @@ class RootLayout(BoxLayout, HoveringBehavior):
             if hasattr(self, 'admin_btn'):
                 self.admin_btn.ping()
 
-    def on_mouse_pos(self, _, pos):
-        x, y = pos
-        self.mouse_highlight_pos = x - 60, y - 60
-
-    def switch_mouse_highlight(self, _, value):
-        if value:
-            self.bind_hovering()
-            self.on_mouse_pos(None, Window.mouse_pos)
-        else:
-            self.unbind_hovering()
-            self.mouse_highlight_pos = -120, -120
-
-        conf.mouse_highlight = value
-
     def switch_animations_enabled(self, _, value):
-        conf.animations = value
+        Config.animations = value
         Notification(
             title_='Restart required',
             message=
@@ -1279,7 +1231,7 @@ class RootLayout(BoxLayout, HoveringBehavior):
 
     @property
     def run_as_admin_shown(self):
-        return getattr(conf, 'run_as_admin_shown', True)
+        return Config.get('run_as_admin_shown', True)
 
     @run_as_admin_shown.setter
     def run_as_admin_shown(self, value):
@@ -1290,7 +1242,7 @@ class RootLayout(BoxLayout, HoveringBehavior):
             self.admin_btn.dismiss()
             del self.admin_btn
 
-        conf.run_as_admin_shown = value
+        Config.run_as_admin_shown = value
 
     @new_thread
     def load_directory(self):
@@ -1340,10 +1292,10 @@ class RootLayout(BoxLayout, HoveringBehavior):
             self.ids.selective_update_btn.disabled = False
             self.ids.update_all_btn.disabled = False
 
-            if conf.show_disclaimer:
+            if Config.get('show_disclaimer', True):
                 Clock.schedule_once(
                     lambda *args: Factory.DisclaimerPopup().open())
-                conf.show_disclaimer = False
+                Config.show_disclaimer = False
 
         self.goto_page(0)
         self.bar.ping()
@@ -1441,7 +1393,7 @@ class RootLayout(BoxLayout, HoveringBehavior):
         if not path:
             path = ''
 
-        self.ids.game_add_form_dir.text = path
+        self.ids.game_add_form_dir.text_ = path
 
     def game_launch_path_button_callback(self):
         path = easygui.fileopenbox(
@@ -1450,7 +1402,7 @@ class RootLayout(BoxLayout, HoveringBehavior):
         if not path:
             path = ''
 
-        self.ids.game_add_form_launch.text = path
+        self.ids.game_add_form_launch.text_ = path
 
     def add_game_callback(self):
         game_name = self.ids.game_name_input.text
@@ -1480,8 +1432,8 @@ class RootLayout(BoxLayout, HoveringBehavior):
 
     def cancel_add_game_callback(self):
         self.ids.game_name_input.text = ''
-        self.ids.game_add_form_dir.text = ''
-        self.ids.game_add_form_launch.text = ''
+        self.ids.game_add_form_dir.text_ = ''
+        self.ids.game_add_form_launch.text_ = ''
         self.ids.url_input.text = ''
         self.goto_page(1)
 
@@ -1492,27 +1444,6 @@ class RootLayout(BoxLayout, HoveringBehavior):
     def uninstall_prompt(self):
         self.uninstall_popup = Factory.UninstallPopup()
         self.uninstall_popup.open()
-
-    def uninstall(self):
-        LNK_PATH = os.path.expanduser(
-            '~\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\XtremeUpdater.lnk'
-        )
-        UNINST_PATH = 'C:\\XtremeUpdaterUninstall\\XtremeUpdater-Uninstall.bat'
-        UNINST_DATA = ('@timeout /t 5 /nobreak\n'
-                       '@rmdir /q /s %localappdata%\\XtremeUpdater\n'
-                       '(goto) 2>nul & del "%~f0"')
-
-        try:
-            os.remove(LNK_PATH)
-        except FileNotFoundError:
-            pass
-
-        os.makedirs(os.path.dirname(UNINST_PATH), exist_ok=True)
-        with open(UNINST_PATH, 'w') as stream:
-            stream.write(UNINST_DATA)
-
-        os.startfile(UNINST_PATH)
-        app.stop()
 
     @silent_exc
     def export_logs(self):
@@ -1539,6 +1470,7 @@ class RootLayout(BoxLayout, HoveringBehavior):
             height=160).open()
 
 
+# Config TODO: move to individual file
 class ConfLastDlls:
     PATH = '.config/LastDlls.yaml'
 
@@ -1588,15 +1520,56 @@ class ConfLastDlls:
 
 
 class XtremeUpdaterApp(App):
+    def on_start(self):
+        # Check for updates
+        if hasattr(sys, 'frozen'):  # or True: # debug
+            REPO_PATH = os.path.abspath(
+                os.path.join(os.path.dirname(sys.executable), os.pardir))
+            # REPO_PATH = r"C:\Users\jakub\AppData\Local\XtremeUpdater\repo" # debug
+            self.update_client = UpdateClient(REPO_PATH)
+            if self.update_client.is_update_available() or Config.get(
+                    'force_update', False):  # or True: # debug
+                Config.force_update = False
+                Logger.info('UpdateClient: Application considered as outdated')
+                self.update_notif = WorkingNotif(text='Downloading an update')
+                self.update_notif.open()
+                self._download_update()
+            else:
+                Logger.info(
+                    'UpdateClient: Application considered as up-to-date')
+
+    def on_stop(self):
+        Config.dump_to_file()
+
+    @new_thread
+    def _download_update(self):
+        # Download update utility and display a popup
+        if not self.update_client.is_newest_util():
+            Logger.info(
+                'UpdateClient: Hashes do not match. Need to download fresh update-utility'
+            )
+            if not self.update_client.download_util():
+                return
+        else:
+            Logger.info(
+                'UpdateClient: Hashes match. Fresh update-utility not needed')
+        self.update_notif.dismiss()
+        Clock.schedule_once(lambda *__: Factory.UpdateRestartPopup().open(), 0)
+
+    def _restart_for_update(self):
+        # Dismiss popup and run update utility
+        if hasattr(self, 'update_notif'):
+            self.update_notif.dismiss()
+
+        self.update_client.run_util()
+        self.stop()
+
     def open_settings(self):
         self.root.goto_page(3)
 
 
-Logger.info('Reading config..')
-conf = Conf(STORE_PATH, DEFAULT_STORE)
-
 Logger.info('Reading theme..')
-theme = Theme()
+theme = Theme(name=Config.get('theme', 'default'))
 
 if __name__ == '__main__':
     Logger.info(f'System = {platform.system()}')
@@ -1605,6 +1578,11 @@ if __name__ == '__main__':
     Window.clearcolor = theme.dark
 
     app = XtremeUpdaterApp()
-    app.run()
 
-__version__ = '0.7.2'
+    # set attributes required by the .kv file
+    app.Config = Config
+    app.version = __version__
+    app.theme = theme
+    app.as_admin = IS_ADMIN
+
+    app.run()
